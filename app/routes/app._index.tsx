@@ -8,7 +8,8 @@ import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { admin } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
+  const shop = session.shop;
 
   // Fetch counts
   const res = await admin.graphql(`#graphql
@@ -32,13 +33,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const countData = await countRes.json();
 
   return {
-    productCount: countData.data?.productsCount?.count ?? 0,
+    productCount:    countData.data?.productsCount?.count ?? 0,
     collectionCount: countData.data?.collectionsCount?.count ?? 0,
+    shop,
   };
 };
 
 export default function Dashboard() {
-  const { productCount, collectionCount } = useLoaderData<typeof loader>();
+  const { productCount, collectionCount, shop } = useLoaderData<typeof loader>();
 
   return (
     <Page>
@@ -67,7 +69,7 @@ export default function Dashboard() {
             <Card>
               <BlockStack gap="200">
                 <Text as="h3" variant="headingSm" tone="subdued">Store</Text>
-                <Text as="p" variant="headingMd">fineystjackets.com</Text>
+                <Text as="p" variant="headingMd">{shop}</Text>
               </BlockStack>
             </Card>
           </Layout.Section>

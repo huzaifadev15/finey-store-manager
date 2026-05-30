@@ -133,7 +133,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     if (coll.sortOrder !== "MANUAL") {
       const numId = coll.id.split("/").pop();
       const collType = "custom_collections"; // try custom first
-      await fetch(`https://${process.env.SHOPIFY_APP_URL?.replace("https://", "") || "fineystjackets.myshopify.com"}/admin/api/2024-01/${collType}/${numId}.json`, {
+      await fetch(`https://${process.env.SHOPIFY_SHOP_DOMAIN}/admin/api/2024-01/${collType}/${numId}.json`, {
         method: "PUT",
         headers: {
           "X-Shopify-Access-Token": process.env.SHOPIFY_API_SECRET || "",

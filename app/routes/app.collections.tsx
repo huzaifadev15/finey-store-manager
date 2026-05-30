@@ -13,7 +13,9 @@ import { useState } from "react";
 // ── Loader: all collections ───────────────────────────────────────────────────
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { admin } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
+  const shop = session.shop; // e.g. fineystjackets.myshopify.com
+  const storeDomain = process.env.SHOP_STORE_URL || `https://${shop}`;
   const url = new URL(request.url);
   const cursor = url.searchParams.get("cursor") || null;
 
@@ -45,7 +47,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       handle:       e.node.handle,
       productCount: e.node.productsCount?.count ?? 0,
       sortOrder:    e.node.sortOrder,
-      shopifyUrl:   `https://www.fineystjackets.com/collections/${e.node.handle}`,
+      shopifyUrl:   `${storeDomain}/collections/${e.node.handle}`,
       metafields:   e.node.metafields.edges.map((m: any) => m.node),
     })),
     pageInfo: conn.pageInfo,

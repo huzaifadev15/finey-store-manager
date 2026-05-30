@@ -114,7 +114,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           handle:       e.node.handle,
           product_count: e.node.productsCount?.count ?? 0,
           sort_order:   e.node.sortOrder,
-          shopify_url:  `https://www.fineystjackets.com/collections/${e.node.handle}`,
+          shopify_url:  `https://${process.env.SHOPIFY_SHOP_DOMAIN}/collections/${e.node.handle}`,
           canonical_url: e.node.canonical_url?.value ?? "",
         });
       }
