@@ -2,11 +2,11 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { useFetcher } from "@remix-run/react";
 import {
   Page, Layout, Card, Text, BlockStack, Button,
-  Banner, Divider, List, InlineStack, DropZone, Thumbnail,
+  Banner, Divider, List, DropZone, Thumbnail,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
@@ -75,13 +75,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       [p.id, p.title, p.handle, p.status, ...metaCols.map(k => p.meta[k] ?? "")].map(esc).join(",")
     );
     const csv = [header, ...rows].join("\n");
-
-    return new Response(csv, {
-      headers: {
-        "Content-Type": "text/csv",
-        "Content-Disposition": `attachment; filename="products-priority-${new Date().toISOString().slice(0, 10)}.csv"`,
-      },
-    });
+    return { intent: "export-products", csv, filename: `products-${new Date().toISOString().slice(0, 10)}.csv` };
   }
 
   // ── Export Collections ────────────────────────────────────────────────────────
@@ -131,13 +125,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       [c.id, c.title, c.handle, c.product_count, c.sort_order, c.shopify_url, c.canonical_url].map(esc).join(",")
     );
     const csv = [header, ...rows].join("\n");
-
-    return new Response(csv, {
-      headers: {
-        "Content-Type": "text/csv",
-        "Content-Disposition": `attachment; filename="collections-${new Date().toISOString().slice(0, 10)}.csv"`,
-      },
-    });
+    return { intent: "export-collections", csv, filename: `collections-${new Date().toISOString().slice(0, 10)}.csv` };
   }
 
   // ── Import priorities from CSV ────────────────────────────────────────────────
@@ -203,6 +191,22 @@ export default function ImportExport() {
 
   const isImporting = fetcher.state !== "idle";
 
+  // Trigger browser file download when CSV data comes back from the server
+  useEffect(() => {
+    const data = fetcher.data as any;
+    if (data?.csv && data?.filename) {
+      const blob = new Blob([data.csv], { type: "text/csv;charset=utf-8;" });
+      const url  = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href     = url;
+      link.download = data.filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    }
+  }, [fetcher.data]);
+
   return (
     <Page>
       <TitleBar title="Import / Export" />
@@ -223,13 +227,12 @@ export default function ImportExport() {
                   <List.Item>All products included</List.Item>
                   <List.Item>Edit in Excel, import back to update priorities</List.Item>
                 </List>
-                {/* Plain form — browser handles the CSV download directly */}
-                <form method="POST" action="/app/import-export">
+                <fetcher.Form method="POST" action="/app/import-export">
                   <input type="hidden" name="intent" value="export-products" />
-                  <Button submit variant="primary">
+                  <Button submit loading={fetcher.state !== "idle" && (fetcher.formData?.get("intent") === "export-products")} variant="primary">
                     Download Products CSV
                   </Button>
-                </form>
+                </fetcher.Form>
               </BlockStack>
             </Card>
           </Layout.Section>
@@ -246,12 +249,12 @@ export default function ImportExport() {
                   <List.Item>Columns: id, title, handle, product_count, sort_order, shopify_url, canonical_url</List.Item>
                   <List.Item>All collections included</List.Item>
                 </List>
-                <form method="POST" action="/app/import-export">
+                <fetcher.Form method="POST" action="/app/import-export">
                   <input type="hidden" name="intent" value="export-collections" />
-                  <Button submit>
+                  <Button submit loading={fetcher.state !== "idle" && (fetcher.formData?.get("intent") === "export-collections")}>
                     Download Collections CSV
                   </Button>
-                </form>
+                </fetcher.Form>
               </BlockStack>
             </Card>
           </Layout.Section>
