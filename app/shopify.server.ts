@@ -4,13 +4,10 @@ import {
   AppDistribution,
   shopifyApp,
 } from "@shopify/shopify-app-remix/server";
-import { SQLiteSessionStorage } from "@shopify/shopify-app-session-storage-sqlite";
-import path from "path";
+import { MemorySessionStorage } from "@shopify/shopify-app-session-storage-memory";
 
-// Simple file-based session storage — no database, no ORM, no migrations needed
-const sessionStorage = new SQLiteSessionStorage(
-  path.join(process.cwd(), "sessions.sqlite")
-);
+// Memory session storage — works on Vercel serverless (no filesystem needed)
+const sessionStorage = new MemorySessionStorage();
 
 const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY,
