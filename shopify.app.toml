@@ -6,7 +6,7 @@ embedded = true
 name = "Finey Store Manager"
 
 [access_scopes]
-scopes = "read_products,write_products,read_collections,write_collections,read_metafields,write_metafields"
+scopes = "read_products,write_products"
 
 [webhooks]
 api_version = "2026-07"
@@ -23,5 +23,4 @@ api_version = "2026-07"
 redirect_urls = [ "https://finey-store-manager.vercel.app/auth/callback", "https://finey-store-manager.vercel.app/auth/shopify/callback", "https://finey-store-manager.vercel.app/api/auth" ]
 
 [build]
-include_config_on_deploy = true
 automatically_update_urls_on_dev = true
