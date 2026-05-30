@@ -2,11 +2,16 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { useFetcher } from "@remix-run/react";
 import {
   Page, Layout, Card, Text, BlockStack, Button,
-  Banner, Divider, List, DropZone, Thumbnail,
+  Banner, Divider, Checkbox, InlineStack, DropZone, Thumbnail, Box,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import { useState, useCallback, useEffect } from "react";
+
+// Fixed columns for products and collections
+const PRODUCT_FIXED_COLS  = ["id", "title", "handle", "status"];
+const PRODUCT_META_COLS   = ["custom.priority", "custom.canonical_url", "custom.faq", "custom.related_collections", "seo.title", "seo.description"];
+const COLLECTION_ALL_COLS = ["id", "title", "handle", "product_count", "sort_order", "shopify_url", "canonical_url"];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
@@ -69,11 +74,24 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         ? `"${s.replace(/"/g, '""')}"` : s;
     };
 
-    const metaCols = Array.from(allMetaKeys).sort();
-    const header = ["id", "title", "handle", "status", ...metaCols].map(esc).join(",");
-    const rows = products.map(p =>
-      [p.id, p.title, p.handle, p.status, ...metaCols.map(k => p.meta[k] ?? "")].map(esc).join(",")
-    );
+    // Filter to only selected columns
+    const selectedCols   = formData.getAll("productCols") as string[];
+    const selectedMeta   = formData.getAll("productMeta") as string[];
+    const fixedCols      = ["id", "title", "handle", "status"].filter(c => selectedCols.includes(c));
+    const metaColsAll    = Array.from(allMetaKeys).sort();
+    const metaColsFiltered = selectedMeta.length > 0
+      ? metaColsAll.filter(k => selectedMeta.includes(k))
+      : metaColsAll;
+
+    const finalCols = [...fixedCols, ...metaColsFiltered];
+    const header = finalCols.map(esc).join(",");
+    const rows = products.map(p => finalCols.map(col => {
+      if (col === "id")     return esc(p.id);
+      if (col === "title")  return esc(p.title);
+      if (col === "handle") return esc(p.handle);
+      if (col === "status") return esc(p.status);
+      return esc(p.meta[col] ?? "");
+    }).join(","));
     const csv = [header, ...rows].join("\n");
     return { intent: "export-products", csv, filename: `products-${new Date().toISOString().slice(0, 10)}.csv` };
   }
@@ -116,13 +134,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       cursor = data.data.collections.pageInfo.endCursor;
     }
 
-    const header = "id,title,handle,product_count,sort_order,shopify_url,canonical_url";
-    const esc = (v: any) => {
+    const selectedCollCols = formData.getAll("collectionCols") as string[];
+    const allCollCols = ["id", "title", "handle", "product_count", "sort_order", "shopify_url", "canonical_url"];
+    const finalCollCols = selectedCollCols.length > 0
+      ? allCollCols.filter(c => selectedCollCols.includes(c))
+      : allCollCols;
+
+    const esc2 = (v: any) => {
       const s = String(v ?? "");
       return s.includes(",") || s.includes('"') ? `"${s.replace(/"/g, '""')}"` : s;
     };
+    const header = finalCollCols.map(esc2).join(",");
     const rows = collections.map(c =>
-      [c.id, c.title, c.handle, c.product_count, c.sort_order, c.shopify_url, c.canonical_url].map(esc).join(",")
+      finalCollCols.map(col => esc2((c as any)[col] ?? "")).join(",")
     );
     const csv = [header, ...rows].join("\n");
     return { intent: "export-collections", csv, filename: `collections-${new Date().toISOString().slice(0, 10)}.csv` };
@@ -185,13 +209,35 @@ export default function ImportExport() {
   const fetcher = useFetcher<typeof action>();
   const [file, setFile] = useState<File | null>(null);
 
+  // Products column selection — fixed cols always shown, meta cols toggleable
+  const [productFixedCols, setProductFixedCols] = useState<Record<string, boolean>>({
+    id: true, title: true, handle: true, status: true,
+  });
+  const [productMetaCols, setProductMetaCols] = useState<Record<string, boolean>>({
+    "custom.priority": true,
+    "custom.canonical_url": true,
+    "custom.faq": false,
+    "custom.related_collections": false,
+    "seo.title": true,
+    "seo.description": true,
+  });
+
+  // Collections column selection
+  const [collectionCols, setCollectionCols] = useState<Record<string, boolean>>({
+    id: true, title: true, handle: true,
+    product_count: true, sort_order: true,
+    shopify_url: true, canonical_url: true,
+  });
+
   const handleDrop = useCallback((_: File[], accepted: File[]) => {
     setFile(accepted[0] ?? null);
   }, []);
 
-  const isImporting = fetcher.state !== "idle";
+  const isExportingProducts    = fetcher.state !== "idle" && fetcher.formData?.get("intent") === "export-products";
+  const isExportingCollections = fetcher.state !== "idle" && fetcher.formData?.get("intent") === "export-collections";
+  const isImporting            = fetcher.state !== "idle" && fetcher.formData?.get("intent") === "import-priorities";
 
-  // Trigger browser file download when CSV data comes back from the server
+  // Trigger browser file download when CSV data comes back
   useEffect(() => {
     const data = fetcher.data as any;
     if (data?.csv && data?.filename) {
@@ -212,7 +258,7 @@ export default function ImportExport() {
       <TitleBar title="Import / Export" />
       <BlockStack gap="500">
 
-        {/* Export — use plain HTML forms so browser triggers file download */}
+        {/* ── Export Products ───────────────────────────────────────────────── */}
         <Layout>
           <Layout.Section variant="oneHalf">
             <Card>
@@ -220,16 +266,55 @@ export default function ImportExport() {
                 <Text as="h2" variant="headingMd">📥 Export Products</Text>
                 <Divider />
                 <Text as="p" variant="bodyMd" tone="subdued">
-                  Download all products with their title, handle, status, and all metafields as a CSV file.
+                  Select the columns you want to include in the CSV:
                 </Text>
-                <List type="bullet">
-                  <List.Item>Columns: id, title, handle, status + all metafields</List.Item>
-                  <List.Item>All products included</List.Item>
-                  <List.Item>Edit in Excel, import back to update priorities</List.Item>
-                </List>
+
+                {/* Fixed columns */}
+                <BlockStack gap="100">
+                  <Text as="p" variant="bodySm" fontWeight="semibold">Basic Fields</Text>
+                  <Box padding="200" background="bg-surface-secondary" borderRadius="200">
+                    <InlineStack gap="400" wrap>
+                      {PRODUCT_FIXED_COLS.map(col => (
+                        <Checkbox
+                          key={col}
+                          label={col}
+                          checked={productFixedCols[col] ?? true}
+                          onChange={v => setProductFixedCols(prev => ({ ...prev, [col]: v }))}
+                        />
+                      ))}
+                    </InlineStack>
+                  </Box>
+                </BlockStack>
+
+                {/* Metafield columns */}
+                <BlockStack gap="100">
+                  <Text as="p" variant="bodySm" fontWeight="semibold">Metafields</Text>
+                  <Box padding="200" background="bg-surface-secondary" borderRadius="200">
+                    <InlineStack gap="400" wrap>
+                      {PRODUCT_META_COLS.map(col => (
+                        <Checkbox
+                          key={col}
+                          label={col}
+                          checked={productMetaCols[col] ?? false}
+                          onChange={v => setProductMetaCols(prev => ({ ...prev, [col]: v }))}
+                        />
+                      ))}
+                      <Text as="span" variant="bodySm" tone="subdued">+ all other metafields auto-included</Text>
+                    </InlineStack>
+                  </Box>
+                </BlockStack>
+
                 <fetcher.Form method="POST" action="/app/import-export">
                   <input type="hidden" name="intent" value="export-products" />
-                  <Button submit loading={fetcher.state !== "idle" && (fetcher.formData?.get("intent") === "export-products")} variant="primary">
+                  {/* Pass selected fixed cols */}
+                  {PRODUCT_FIXED_COLS.filter(c => productFixedCols[c]).map(c => (
+                    <input key={c} type="hidden" name="productCols" value={c} />
+                  ))}
+                  {/* Pass selected meta cols */}
+                  {PRODUCT_META_COLS.filter(c => productMetaCols[c]).map(c => (
+                    <input key={c} type="hidden" name="productMeta" value={c} />
+                  ))}
+                  <Button submit loading={isExportingProducts} variant="primary">
                     Download Products CSV
                   </Button>
                 </fetcher.Form>
@@ -237,21 +322,35 @@ export default function ImportExport() {
             </Card>
           </Layout.Section>
 
+          {/* ── Export Collections ──────────────────────────────────────────── */}
           <Layout.Section variant="oneHalf">
             <Card>
               <BlockStack gap="400">
                 <Text as="h2" variant="headingMd">📥 Export Collections</Text>
                 <Divider />
                 <Text as="p" variant="bodyMd" tone="subdued">
-                  Download all collections with their canonical URL, sort order, and product count.
+                  Select the columns you want to include in the CSV:
                 </Text>
-                <List type="bullet">
-                  <List.Item>Columns: id, title, handle, product_count, sort_order, shopify_url, canonical_url</List.Item>
-                  <List.Item>All collections included</List.Item>
-                </List>
+
+                <Box padding="200" background="bg-surface-secondary" borderRadius="200">
+                  <BlockStack gap="200">
+                    {COLLECTION_ALL_COLS.map(col => (
+                      <Checkbox
+                        key={col}
+                        label={col}
+                        checked={collectionCols[col] ?? true}
+                        onChange={v => setCollectionCols(prev => ({ ...prev, [col]: v }))}
+                      />
+                    ))}
+                  </BlockStack>
+                </Box>
+
                 <fetcher.Form method="POST" action="/app/import-export">
                   <input type="hidden" name="intent" value="export-collections" />
-                  <Button submit loading={fetcher.state !== "idle" && (fetcher.formData?.get("intent") === "export-collections")}>
+                  {COLLECTION_ALL_COLS.filter(c => collectionCols[c]).map(c => (
+                    <input key={c} type="hidden" name="collectionCols" value={c} />
+                  ))}
+                  <Button submit loading={isExportingCollections}>
                     Download Collections CSV
                   </Button>
                 </fetcher.Form>
