@@ -201,14 +201,14 @@ export default function ImportExport() {
     setFile(accepted[0] ?? null);
   }, []);
 
-  const isLoading = fetcher.state !== "idle";
+  const isImporting = fetcher.state !== "idle";
 
   return (
     <Page>
       <TitleBar title="Import / Export" />
       <BlockStack gap="500">
 
-        {/* Export */}
+        {/* Export — use plain HTML forms so browser triggers file download */}
         <Layout>
           <Layout.Section variant="oneHalf">
             <Card>
@@ -216,19 +216,20 @@ export default function ImportExport() {
                 <Text as="h2" variant="headingMd">📥 Export Products</Text>
                 <Divider />
                 <Text as="p" variant="bodyMd" tone="subdued">
-                  Download all products with their title, handle, status, and custom.priority as a CSV file.
+                  Download all products with their title, handle, status, and all metafields as a CSV file.
                 </Text>
                 <List type="bullet">
-                  <List.Item>Columns: id, title, handle, status, priority</List.Item>
+                  <List.Item>Columns: id, title, handle, status + all metafields</List.Item>
                   <List.Item>All products included</List.Item>
                   <List.Item>Edit in Excel, import back to update priorities</List.Item>
                 </List>
-                <fetcher.Form method="POST" action="/app/import-export">
+                {/* Plain form — browser handles the CSV download directly */}
+                <form method="POST" action="/app/import-export">
                   <input type="hidden" name="intent" value="export-products" />
-                  <Button submit loading={isLoading} variant="primary">
+                  <Button submit variant="primary">
                     Download Products CSV
                   </Button>
-                </fetcher.Form>
+                </form>
               </BlockStack>
             </Card>
           </Layout.Section>
@@ -245,12 +246,12 @@ export default function ImportExport() {
                   <List.Item>Columns: id, title, handle, product_count, sort_order, shopify_url, canonical_url</List.Item>
                   <List.Item>All collections included</List.Item>
                 </List>
-                <fetcher.Form method="POST" action="/app/import-export">
+                <form method="POST" action="/app/import-export">
                   <input type="hidden" name="intent" value="export-collections" />
-                  <Button submit loading={isLoading}>
+                  <Button submit>
                     Download Collections CSV
                   </Button>
-                </fetcher.Form>
+                </form>
               </BlockStack>
             </Card>
           </Layout.Section>
@@ -296,8 +297,8 @@ export default function ImportExport() {
                     <Button
                       submit
                       variant="primary"
-                      loading={isLoading}
-                      disabled={!file || isLoading}
+                      loading={isImporting}
+                      disabled={!file || isImporting}
                     >
                       Import & Update Priorities
                     </Button>
