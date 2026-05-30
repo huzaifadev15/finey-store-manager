@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { useFetcher } from "@remix-run/react";
+import { useFetcher, useLoaderData } from "@remix-run/react";
 import {
   Page, Layout, Card, Text, BlockStack, Button,
   Banner, Divider, Checkbox, InlineStack, DropZone, Thumbnail, Box,
@@ -14,8 +14,32 @@ const PRODUCT_META_COLS   = ["custom.priority", "custom.canonical_url", "custom.
 const COLLECTION_ALL_COLS = ["id", "title", "handle", "product_count", "sort_order", "shopify_url", "canonical_url"];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
-  return null;
+  const { admin } = await authenticate.admin(request);
+
+  // Fetch metafield keys from a sample of collections to show as column options
+  const res = await admin.graphql(`#graphql
+    query {
+      collections(first: 50) {
+        edges {
+          node {
+            metafields(first: 20) {
+              edges { node { namespace key } }
+            }
+          }
+        }
+      }
+    }
+  `);
+
+  const data = await res.json();
+  const metaKeys = new Set<string>();
+  for (const e of data.data.collections.edges) {
+    for (const m of e.node.metafields.edges) {
+      metaKeys.add(`${m.node.namespace}.${m.node.key}`);
+    }
+  }
+
+  return { collectionMetaKeys: Array.from(metaKeys).sort() };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -96,22 +120,25 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return { intent: "export-products", csv, filename: `products-${new Date().toISOString().slice(0, 10)}.csv` };
   }
 
-  // ── Export Collections ────────────────────────────────────────────────────────
+  // ── Export Collections (with selected metafields) ────────────────────────────
   if (intent === "export-collections") {
     const collections: any[] = [];
+    const allMetaKeys = new Set<string>();
     let cursor: string | null = null;
 
     while (true) {
       const res = await admin.graphql(`#graphql
         query($cursor: String) {
-          collections(first: 250, after: $cursor, sortKey: TITLE) {
+          collections(first: 50, after: $cursor, sortKey: TITLE) {
             pageInfo { hasNextPage endCursor }
             edges {
               node {
                 id title handle
                 productsCount { count }
                 sortOrder
-                canonical_url: metafield(namespace: "custom", key: "canonical_url") { value }
+                metafields(first: 20) {
+                  edges { node { namespace key value } }
+                }
               }
             }
           }
@@ -120,33 +147,51 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       const data = await res.json();
       for (const e of data.data.collections.edges) {
+        const metaMap: Record<string, string> = {};
+        for (const m of e.node.metafields.edges) {
+          const col = `${m.node.namespace}.${m.node.key}`;
+          metaMap[col] = m.node.value;
+          allMetaKeys.add(col);
+        }
         collections.push({
-          id:           e.node.id.split("/").pop(),
-          title:        e.node.title,
-          handle:       e.node.handle,
+          id:            e.node.id.split("/").pop(),
+          title:         e.node.title,
+          handle:        e.node.handle,
           product_count: e.node.productsCount?.count ?? 0,
-          sort_order:   e.node.sortOrder,
-          shopify_url:  `https://${process.env.SHOPIFY_SHOP_DOMAIN}/collections/${e.node.handle}`,
-          canonical_url: e.node.canonical_url?.value ?? "",
+          sort_order:    e.node.sortOrder,
+          shopify_url:   `https://${process.env.SHOPIFY_SHOP_DOMAIN}/collections/${e.node.handle}`,
+          meta:          metaMap,
         });
       }
       if (!data.data.collections.pageInfo.hasNextPage) break;
       cursor = data.data.collections.pageInfo.endCursor;
     }
 
-    const selectedCollCols = formData.getAll("collectionCols") as string[];
-    const allCollCols = ["id", "title", "handle", "product_count", "sort_order", "shopify_url", "canonical_url"];
-    const finalCollCols = selectedCollCols.length > 0
-      ? allCollCols.filter(c => selectedCollCols.includes(c))
-      : allCollCols;
-
     const esc2 = (v: any) => {
       const s = String(v ?? "");
-      return s.includes(",") || s.includes('"') ? `"${s.replace(/"/g, '""')}"` : s;
+      return s.includes(",") || s.includes('"') || s.includes("\n")
+        ? `"${s.replace(/"/g, '""')}"` : s;
     };
-    const header = finalCollCols.map(esc2).join(",");
+
+    const selectedFixedCols = formData.getAll("collectionCols") as string[];
+    const selectedMetaCols  = formData.getAll("collectionMeta") as string[];
+    const fixedCols         = ["id", "title", "handle", "product_count", "sort_order", "shopify_url"];
+    const finalFixedCols    = selectedFixedCols.length > 0
+      ? fixedCols.filter(c => selectedFixedCols.includes(c))
+      : fixedCols;
+
+    const allMetaArr    = Array.from(allMetaKeys).sort();
+    const finalMetaCols = selectedMetaCols.length > 0
+      ? allMetaArr.filter(k => selectedMetaCols.includes(k))
+      : allMetaArr;
+
+    const finalCols = [...finalFixedCols, ...finalMetaCols];
+    const header = finalCols.map(esc2).join(",");
     const rows = collections.map(c =>
-      finalCollCols.map(col => esc2((c as any)[col] ?? "")).join(",")
+      finalCols.map(col => {
+        if (col in c && col !== "meta") return esc2((c as any)[col] ?? "");
+        return esc2(c.meta[col] ?? "");
+      }).join(",")
     );
     const csv = [header, ...rows].join("\n");
     return { intent: "export-collections", csv, filename: `collections-${new Date().toISOString().slice(0, 10)}.csv` };
@@ -206,6 +251,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function ImportExport() {
+  const { collectionMetaKeys } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const [file, setFile] = useState<File | null>(null);
 
@@ -222,12 +268,15 @@ export default function ImportExport() {
     "seo.description": true,
   });
 
-  // Collections column selection
+  // Collections — fixed cols
   const [collectionCols, setCollectionCols] = useState<Record<string, boolean>>({
     id: true, title: true, handle: true,
-    product_count: true, sort_order: true,
-    shopify_url: true, canonical_url: true,
+    product_count: true, sort_order: true, shopify_url: true,
   });
+  // Collections — metafield cols (initialized from loader, all checked by default)
+  const [collectionMetaCols, setCollectionMetaCols] = useState<Record<string, boolean>>(
+    () => Object.fromEntries((collectionMetaKeys ?? []).map(k => [k, true]))
+  );
 
   const handleDrop = useCallback((_: File[], accepted: File[]) => {
     setFile(accepted[0] ?? null);
@@ -332,23 +381,50 @@ export default function ImportExport() {
                   Select the columns you want to include in the CSV:
                 </Text>
 
-                <Box padding="200" background="bg-surface-secondary" borderRadius="200">
-                  <BlockStack gap="200">
-                    {COLLECTION_ALL_COLS.map(col => (
-                      <Checkbox
-                        key={col}
-                        label={col}
-                        checked={collectionCols[col] ?? true}
-                        onChange={v => setCollectionCols(prev => ({ ...prev, [col]: v }))}
-                      />
-                    ))}
+                {/* Fixed columns */}
+                <BlockStack gap="100">
+                  <Text as="p" variant="bodySm" fontWeight="semibold">Basic Fields</Text>
+                  <Box padding="200" background="bg-surface-secondary" borderRadius="200">
+                    <InlineStack gap="400" wrap>
+                      {["id", "title", "handle", "product_count", "sort_order", "shopify_url"].map(col => (
+                        <Checkbox
+                          key={col}
+                          label={col}
+                          checked={collectionCols[col] ?? true}
+                          onChange={v => setCollectionCols(prev => ({ ...prev, [col]: v }))}
+                        />
+                      ))}
+                    </InlineStack>
+                  </Box>
+                </BlockStack>
+
+                {/* Metafield columns */}
+                {collectionMetaKeys && collectionMetaKeys.length > 0 && (
+                  <BlockStack gap="100">
+                    <Text as="p" variant="bodySm" fontWeight="semibold">Metafields</Text>
+                    <Box padding="200" background="bg-surface-secondary" borderRadius="200">
+                      <BlockStack gap="200">
+                        {collectionMetaKeys.map(col => (
+                          <Checkbox
+                            key={col}
+                            label={col}
+                            checked={collectionMetaCols[col] ?? true}
+                            onChange={v => setCollectionMetaCols(prev => ({ ...prev, [col]: v }))}
+                          />
+                        ))}
+                      </BlockStack>
+                    </Box>
                   </BlockStack>
-                </Box>
+                )}
 
                 <fetcher.Form method="POST" action="/app/import-export">
                   <input type="hidden" name="intent" value="export-collections" />
-                  {COLLECTION_ALL_COLS.filter(c => collectionCols[c]).map(c => (
-                    <input key={c} type="hidden" name="collectionCols" value={c} />
+                  {["id", "title", "handle", "product_count", "sort_order", "shopify_url"]
+                    .filter(c => collectionCols[c]).map(c => (
+                      <input key={c} type="hidden" name="collectionCols" value={c} />
+                  ))}
+                  {(collectionMetaKeys ?? []).filter(c => collectionMetaCols[c]).map(c => (
+                    <input key={c} type="hidden" name="collectionMeta" value={c} />
                   ))}
                   <Button submit loading={isExportingCollections}>
                     Download Collections CSV
