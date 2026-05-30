@@ -1,7 +1,7 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "fca155aacecea599db1a9e2cc5b966fd"
-application_url = "https://example.com"
+application_url = "https://finey-store-manager.vercel.app"
 embedded = true
 name = "Finey Store Manager"
 
@@ -20,7 +20,7 @@ api_version = "2026-07"
   topics = [ "app/scopes_update" ]
 
 [auth]
-redirect_urls = [ "https://example.com/api/auth" ]
+redirect_urls = [ "https://finey-store-manager.vercel.app/auth/callback", "https://finey-store-manager.vercel.app/auth/shopify/callback", "https://finey-store-manager.vercel.app/api/auth" ]
 
 [build]
 include_config_on_deploy = true
